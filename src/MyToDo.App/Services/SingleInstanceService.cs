@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Security.Principal;
@@ -11,15 +10,16 @@ namespace MyToDo.App.Services;
 public sealed class SingleInstanceService : ISingleInstanceService
 {
     private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(2);
-    private static readonly HashSet<string> OwnedNames = new(StringComparer.Ordinal);
-    private static readonly object OwnershipLock = new();
     private readonly string _mutexName;
     private readonly string _pipeName;
     private readonly Mutex _mutex;
     private readonly SemaphoreSlim _activation = new(0, 1);
     private readonly CancellationTokenSource _dispose = new();
+    private readonly ManualResetEventSlim _releaseMutex = new();
+    private readonly object _lifecycleLock = new();
     private Task? _listener;
-    private bool _ownsMutex;
+    private TaskCompletionSource<bool>? _acquisition;
+    private Thread? _ownershipThread;
     private bool _disposed;
 
     public SingleInstanceService(string name)
@@ -32,33 +32,16 @@ public sealed class SingleInstanceService : ISingleInstanceService
 
     public Task<bool> TryAcquireAsync()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_ownsMutex) return Task.FromResult(true);
-        lock (OwnershipLock)
+        lock (_lifecycleLock)
         {
-            if (OwnedNames.Contains(_mutexName)) return Task.FromResult(false);
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_acquisition is not null) return _acquisition.Task;
 
-        var acquired = false;
-        try
-        {
-            try { acquired = _mutex.WaitOne(ConnectionTimeout); }
-            catch (AbandonedMutexException) { acquired = true; }
+            _acquisition = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _ownershipThread = new Thread(AcquireAndOwnMutex) { IsBackground = true };
+            _ownershipThread.Start();
+            return _acquisition.Task;
         }
-        catch (ObjectDisposedException) { return Task.FromResult(false); }
-        if (!acquired) return Task.FromResult(false);
-        lock (OwnershipLock)
-        {
-            if (OwnedNames.Contains(_mutexName))
-            {
-                _mutex.ReleaseMutex();
-                return Task.FromResult(false);
-            }
-            OwnedNames.Add(_mutexName);
-        }
-        _ownsMutex = true;
-        _listener = Task.Run(() => ListenAsync(_dispose.Token));
-        return Task.FromResult(true);
     }
 
     public async Task<bool> WaitForActivationAsync(CancellationToken cancellationToken)
@@ -98,21 +81,24 @@ public sealed class SingleInstanceService : ISingleInstanceService
         if (_disposed) return;
         _disposed = true;
         _dispose.Cancel();
+        _releaseMutex.Set();
         if (_listener is not null)
         {
             try { await _listener.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
             catch (IOException) { }
         }
-        if (_ownsMutex)
+        if (_ownershipThread is not null)
         {
-            try { _mutex.ReleaseMutex(); } catch (ApplicationException) { }
-            lock (OwnershipLock) { OwnedNames.Remove(_mutexName); }
-            _ownsMutex = false;
+            await Task.Run(_ownershipThread.Join).ConfigureAwait(false);
         }
-        _mutex.Dispose();
+        else
+        {
+            _mutex.Dispose();
+        }
         _activation.Dispose();
         _dispose.Dispose();
+        _releaseMutex.Dispose();
     }
 
     private async Task ListenAsync(CancellationToken cancellationToken)
@@ -128,6 +114,34 @@ public sealed class SingleInstanceService : ISingleInstanceService
             catch (OperationCanceledException) { return; }
             catch (IOException) when (cancellationToken.IsCancellationRequested) { return; }
             catch (SemaphoreFullException) { }
+        }
+    }
+
+    private void AcquireAndOwnMutex()
+    {
+        var acquired = false;
+        try
+        {
+            try { acquired = _mutex.WaitOne(ConnectionTimeout); }
+            catch (AbandonedMutexException) { acquired = true; }
+            if (!acquired)
+            {
+                _acquisition!.TrySetResult(false);
+                return;
+            }
+
+            _listener = Task.Run(() => ListenAsync(_dispose.Token));
+            _acquisition!.TrySetResult(true);
+            _releaseMutex.Wait();
+            _mutex.ReleaseMutex();
+        }
+        catch (ObjectDisposedException)
+        {
+            _acquisition!.TrySetResult(false);
+        }
+        finally
+        {
+            _mutex.Dispose();
         }
     }
 }

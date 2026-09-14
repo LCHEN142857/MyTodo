@@ -45,4 +45,32 @@ public sealed class SingleInstanceServiceTests
             await holder;
         }
     }
+
+    [Fact]
+    public async Task Dispose_after_an_async_continuation_releases_the_mutex_for_a_new_instance()
+    {
+        var name = "MyToDo.Tests." + Guid.NewGuid().ToString("N");
+        var first = new SingleInstanceService(name);
+        using var ownerCanExit = new ManualResetEventSlim();
+        var acquired = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new Thread(() =>
+        {
+            acquired.SetResult(first.TryAcquireAsync().GetAwaiter().GetResult());
+            ownerCanExit.Wait();
+        });
+        owner.Start();
+        (await acquired.Task).Should().BeTrue();
+        try
+        {
+            await first.DisposeAsync();
+
+            await using var second = new SingleInstanceService(name);
+            (await second.TryAcquireAsync()).Should().BeTrue();
+        }
+        finally
+        {
+            ownerCanExit.Set();
+            owner.Join();
+        }
+    }
 }

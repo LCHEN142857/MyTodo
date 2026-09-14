@@ -10,12 +10,13 @@ public sealed class SettingsStoreTests
     public async Task Missing_or_corrupt_settings_return_valid_defaults()
     {
         var folder = Directory.CreateTempSubdirectory();
+        var expected = new AppSettings(0, 0, 320, 520, .92, false);
         try
         {
             var store = new SettingsStore(folder.FullName);
-            (await store.LoadAsync()).Should().Be(AppSettings.Default);
+            (await store.LoadAsync()).Should().Be(expected);
             await File.WriteAllTextAsync(store.FilePath, "not-json");
-            (await store.LoadAsync()).Should().Be(AppSettings.Default);
+            (await store.LoadAsync()).Should().Be(expected);
         }
         finally { folder.Delete(true); }
     }
