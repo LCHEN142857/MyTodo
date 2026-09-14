@@ -21,6 +21,28 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task Renaming_items_reapplies_search_filter_in_both_directions()
+    {
+        await using var repository = await SeededRepository.CreateAsync("Alpha", "Beta");
+        var vm = await MainViewModel.CreateAsync(repository.Repository);
+        var nonMatchingItem = vm.VisibleItems.Single(x => x.Content == "Beta");
+        vm.SearchText = "alp";
+
+        var matchingItem = vm.VisibleItems.Single();
+        matchingItem.BeginEdit();
+        matchingItem.EditText = "Gamma";
+        await matchingItem.SaveEditAsync();
+
+        vm.VisibleItems.Should().BeEmpty();
+
+        nonMatchingItem.BeginEdit();
+        nonMatchingItem.EditText = "Alphabet";
+        await nonMatchingItem.SaveEditAsync();
+
+        vm.VisibleItems.Select(x => x.Content).Should().Equal("Alphabet");
+    }
+
+    [Fact]
     public async Task Completing_item_moves_it_from_todo_to_history()
     {
         await using var repository = await SeededRepository.CreateAsync("Finish me");

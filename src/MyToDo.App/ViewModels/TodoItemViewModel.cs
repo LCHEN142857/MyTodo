@@ -10,6 +10,7 @@ public sealed class TodoItemViewModel : ObservableObject
     private readonly ITodoRepository _repository;
     private readonly Func<TodoItemViewModel, TodoStatus, Task>? _statusChanged;
     private readonly Action<string>? _errorReported;
+    private readonly Action? _contentChanged;
     private TodoItem _item;
     private string _content;
     private string _editText;
@@ -17,16 +18,17 @@ public sealed class TodoItemViewModel : ObservableObject
     private string? _errorMessage;
 
     public TodoItemViewModel(TodoItem item, ITodoRepository repository)
-        : this(item, repository, null, null)
+        : this(item, repository, null, null, null)
     {
     }
 
-    internal TodoItemViewModel(TodoItem item, ITodoRepository repository, Func<TodoItemViewModel, TodoStatus, Task>? statusChanged, Action<string>? errorReported)
+    internal TodoItemViewModel(TodoItem item, ITodoRepository repository, Func<TodoItemViewModel, TodoStatus, Task>? statusChanged, Action<string>? errorReported, Action? contentChanged)
     {
         _item = item ?? throw new ArgumentNullException(nameof(item));
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _statusChanged = statusChanged;
         _errorReported = errorReported;
+        _contentChanged = contentChanged;
         _content = item.Content;
         _editText = item.Content;
 
@@ -97,6 +99,7 @@ public sealed class TodoItemViewModel : ObservableObject
             EditText = content;
             IsEditing = false;
             ErrorMessage = null;
+            _contentChanged?.Invoke();
         }
         catch (Exception exception)
         {

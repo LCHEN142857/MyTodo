@@ -172,7 +172,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private TodoItemViewModel CreateRow(TodoItem item) => new(item, _repository, HandleStatusChangeAsync, ReportError);
+    private TodoItemViewModel CreateRow(TodoItem item) => new(item, _repository, HandleStatusChangeAsync, ReportError, RefreshVisibleItems);
 
     private Task HandleStatusChangeAsync(TodoItemViewModel item, TodoStatus status)
     {
