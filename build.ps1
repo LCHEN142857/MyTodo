@@ -1,0 +1,64 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Debug', 'Release')]
+    [string] $Configuration = 'Release',
+    [ValidateSet('win-x64')]
+    [string] $Runtime = 'win-x64'
+)
+
+$ErrorActionPreference = 'Stop'
+
+function IsChildOf([string] $Path, [string] $Parent) {
+    $resolvedPath = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedParent = [IO.Path]::GetFullPath($Parent).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    return $resolvedPath.StartsWith($resolvedParent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Invoke-Dotnet([string[]] $Arguments) {
+    & $script:Dotnet @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet command failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')"
+    }
+}
+
+$repositoryRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts'))
+$publishPath = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'publish'))
+if (-not (IsChildOf $publishPath $artifactsRoot)) {
+    throw "Refusing to clean publish path outside artifacts: $publishPath"
+}
+
+$dotnetCandidates = @()
+if ($env:MYTODO_DOTNET) { $dotnetCandidates += $env:MYTODO_DOTNET }
+$dotnetCandidates += (Join-Path $repositoryRoot '.tools\dotnet8\dotnet.exe')
+$systemDotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($systemDotnet) { $dotnetCandidates += $systemDotnet.Source }
+$script:Dotnet = $dotnetCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+if (-not $script:Dotnet) {
+    throw 'Unable to find dotnet. Install the .NET 8 SDK or place it at .tools\dotnet8\dotnet.exe.'
+}
+
+Write-Host "Using dotnet: $script:Dotnet"
+Write-Host 'Restoring solution...'
+Invoke-Dotnet @('restore', (Join-Path $repositoryRoot 'MyToDo.sln'))
+
+Write-Host 'Running test suite...'
+Invoke-Dotnet @('test', (Join-Path $repositoryRoot 'MyToDo.sln'), '-c', $Configuration)
+
+if (Test-Path -LiteralPath $publishPath) {
+    Write-Host "Cleaning $publishPath"
+    Remove-Item -LiteralPath $publishPath -Recurse -Force
+}
+New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
+
+Write-Host "Publishing $Runtime single-file executable..."
+$runtimeIdentifierProperty = "-p:RuntimeIdentifier=$Runtime"
+Invoke-Dotnet @('publish', (Join-Path $repositoryRoot 'src\MyToDo.App\MyToDo.App.csproj'), '-c', $Configuration, '-r', $Runtime, $runtimeIdentifierProperty, '-p:SelfContained=true', '-p:PublishSingleFile=true', '-p:AssemblyName=MyToDo', '-o', $publishPath)
+
+$executablePath = Join-Path $publishPath 'MyToDo.exe'
+if (-not (Test-Path -LiteralPath $executablePath)) {
+    throw "Publish completed without expected executable: $executablePath"
+}
+$executable = Get-Item -LiteralPath $executablePath
+if ($executable.Length -le 0) { throw "Published executable is empty: $executablePath" }
+Write-Host ("Published executable: {0} ({1:N0} bytes)" -f $executable.FullName, $executable.Length)
