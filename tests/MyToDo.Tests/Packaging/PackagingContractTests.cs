@@ -14,10 +14,11 @@ public sealed class PackagingContractTests
         File.Exists(buildScript).Should().BeTrue($"build script should exist at {buildScript}");
 
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"MyToDo-Packaging-{Guid.NewGuid():N}");
-        var publishDirectory = Path.Combine(tempDirectory, "publish");
+        var publishDirectory = Path.Combine(RepositoryRoot, "artifacts", $"PackagingTests-{Guid.NewGuid():N}");
         var logPath = Path.Combine(tempDirectory, "dotnet.log");
         var shimPath = Path.Combine(tempDirectory, "dotnet.cmd");
         Directory.CreateDirectory(tempDirectory);
+        Directory.CreateDirectory(Path.GetDirectoryName(publishDirectory)!);
         Directory.CreateDirectory(publishDirectory);
         File.WriteAllText(Path.Combine(publishDirectory, "stale.txt"), "stale");
         File.WriteAllText(shimPath, "@echo off\r\necho %*>>\"%MYTODO_DOTNET_LOG%\"\r\necho %* | findstr /C:\"publish\" >nul\r\nif not errorlevel 1 (\r\n  if not exist \"%MYTODO_DOTNET_PUBLISH_DIR%\" mkdir \"%MYTODO_DOTNET_PUBLISH_DIR%\"\r\n  echo packaged>\"%MYTODO_DOTNET_PUBLISH_DIR%\\MyToDo.exe\"\r\n)\r\nexit /b 0\r\n");
@@ -58,6 +59,7 @@ public sealed class PackagingContractTests
             Environment.SetEnvironmentVariable("MYTODO_DOTNET_LOG", originalLog);
             Environment.SetEnvironmentVariable("MYTODO_DOTNET_PUBLISH_DIR", originalPublish);
             if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+            if (Directory.Exists(publishDirectory)) Directory.Delete(publishDirectory, true);
         }
     }
 
@@ -76,9 +78,75 @@ public sealed class PackagingContractTests
         readme.Should().Contain("self-contained").And.Contain(".NET");
     }
 
+    [Fact]
+    public void Build_script_rejects_output_paths_outside_artifacts()
+    {
+        var buildScript = Path.Combine(RepositoryRoot, "build.ps1");
+        var externalPath = Path.Combine(Path.GetTempPath(), $"MyToDo-External-{Guid.NewGuid():N}");
+
+        var result = RunPowerShell("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", buildScript, "-OutputPath", externalPath);
+
+        result.ExitCode.Should().NotBe(0);
+        result.Output.Should().Contain("artifacts");
+        Directory.Exists(externalPath).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Build_script_rejects_reparse_point_ancestor_under_artifacts()
+    {
+        var buildScript = Path.Combine(RepositoryRoot, "build.ps1");
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"MyToDo-Reparse-{Guid.NewGuid():N}");
+        var targetDirectory = Path.Combine(tempDirectory, "target");
+        var artifactsDirectory = Path.Combine(RepositoryRoot, "artifacts");
+        var junctionPath = Path.Combine(artifactsDirectory, $".packaging-junction-{Guid.NewGuid():N}");
+        var shimPath = Path.Combine(tempDirectory, "dotnet.cmd");
+        Directory.CreateDirectory(targetDirectory);
+        Directory.CreateDirectory(artifactsDirectory);
+        File.WriteAllText(shimPath, "@echo off\r\nexit /b 7\r\n");
+
+        try
+        {
+            var junction = StartProcess("cmd.exe", "/c", "mklink", "/J", junctionPath, targetDirectory);
+            junction.ExitCode.Should().Be(0, junction.Output);
+
+            var result = RunPowerShellWithEnvironment(
+                new Dictionary<string, string> { ["MYTODO_DOTNET"] = shimPath },
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", buildScript,
+                "-OutputPath", Path.Combine(junctionPath, "publish"));
+
+            result.ExitCode.Should().NotBe(0);
+            result.Output.Should().Contain("reparse");
+            Directory.Exists(Path.Combine(targetDirectory, "publish")).Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(junctionPath)) Directory.Delete(junctionPath, true);
+            if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+        }
+    }
+
     private static (int ExitCode, string Output) RunPowerShell(params string[] arguments)
+        => RunPowerShellWithEnvironment(new Dictionary<string, string>(), arguments);
+
+    private static (int ExitCode, string Output) RunPowerShellWithEnvironment(IReadOnlyDictionary<string, string> environment, params string[] arguments)
     {
         var startInfo = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var pair in environment) startInfo.Environment[pair.Key] = pair.Value;
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(startInfo)!;
+        var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode, output);
+    }
+
+    private static (int ExitCode, string Output) StartProcess(string fileName, params string[] arguments)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo(fileName)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

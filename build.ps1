@@ -15,6 +15,31 @@ function IsChildOf([string] $Path, [string] $Parent) {
     return $resolvedPath.StartsWith($resolvedParent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Assert-SafeOutputPath([string] $Path, [string] $ArtifactsRoot) {
+    $normalizedPath = $Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $normalizedArtifacts = $ArtifactsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if ($normalizedPath -eq $normalizedArtifacts -or -not (IsChildOf $normalizedPath $normalizedArtifacts)) {
+        throw "Output path must be a descendant of artifacts: $Path"
+    }
+
+    $current = $normalizedPath
+    while ($true) {
+        if (Test-Path -LiteralPath $current) {
+            $item = Get-Item -LiteralPath $current -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to use reparse-point output ancestor: $current"
+            }
+        }
+        if ($current -ieq $normalizedArtifacts) { break }
+        $parentInfo = [IO.Directory]::GetParent($current)
+        $parent = if ($parentInfo) { $parentInfo.FullName } else { $null }
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -ieq $current) {
+            throw "Could not validate output path ancestors: $Path"
+        }
+        $current = $parent.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    }
+}
+
 function Invoke-Dotnet([string[]] $Arguments) {
     & $script:Dotnet @Arguments
     if ($LASTEXITCODE -ne 0) {
@@ -36,14 +61,7 @@ $normalizedPublishPath = $publishPath.TrimEnd([IO.Path]::DirectorySeparatorChar,
 if ([string]::IsNullOrWhiteSpace($normalizedPublishPath) -or $normalizedPublishPath -eq [IO.Path]::GetPathRoot($normalizedPublishPath)) {
     throw "Refusing to clean filesystem root: $publishPath"
 }
-$isUnderRepository = IsChildOf $publishPath $repositoryRoot
-$isUnderArtifacts = IsChildOf $publishPath $artifactsRoot
-if ($isUnderRepository -and -not $isUnderArtifacts) {
-    throw "Refusing to clean repository path outside artifacts: $publishPath"
-}
-if ([string]::IsNullOrWhiteSpace($OutputPath) -and -not $isUnderArtifacts) {
-    throw "Refusing to clean default publish path outside artifacts: $publishPath"
-}
+Assert-SafeOutputPath $publishPath $artifactsRoot
 if (Test-Path -LiteralPath $publishPath) {
     $publishItem = Get-Item -LiteralPath $publishPath -Force
     if (($publishItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
