@@ -40,6 +40,7 @@ public sealed class UiContractTests
         codeBehind.Should().NotContain("_persistTask");
         codeBehind.Should().Contain("PersistSettingsAsync");
         codeBehind.Should().Contain("await PersistSettingsAsync()");
+        codeBehind.Should().Contain("DispatcherPriority.ApplicationIdle");
         text.Should().Contain("<MultiDataTrigger>");
         text.Should().Contain("Binding=\"{Binding IsEditing}\" Value=\"False\"");
         text.Should().Contain("Binding=\"{Binding IsEditing}\" Value=\"True\"");

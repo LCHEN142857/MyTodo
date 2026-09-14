@@ -28,8 +28,8 @@ public partial class MainWindow : Window
     private readonly ScrollbarVisibilityController _scrollbarVisibility;
     private readonly DispatcherTimer _shellRefreshTimer;
     private readonly SettingsSaveCoordinator _settingsSaveCoordinator;
+    private readonly DesktopActivationState _desktopActivation = new();
     private MainViewModel? _subscribedViewModel;
-    private bool _temporarilyDetachedForActivation;
     private bool _activationInProgress;
     private readonly HashSet<TodoItemViewModel> _subscribedRows = [];
     private ScrollViewer? _todoScrollViewer;
@@ -77,12 +77,15 @@ public partial class MainWindow : Window
             Show();
             if (!Topmost)
             {
-                _temporarilyDetachedForActivation = true;
+                _desktopActivation.MarkDetached();
                 _desktopWindowService.DetachFromDesktop(handle);
             }
 
             _desktopWindowService.ActivateWindow(handle);
             Activate();
+            _desktopActivation.ScheduleRestore(
+                callback => Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, callback),
+                RestoreDesktopPlacement);
         }
         finally
         {
@@ -119,15 +122,19 @@ public partial class MainWindow : Window
 
     private void ReapplyDesktopAttachment()
     {
-        if (!Topmost && !_temporarilyDetachedForActivation) _desktopWindowService.AttachToDesktop(new WindowInteropHelper(this).Handle);
+        if (!Topmost && !_desktopActivation.IsRestorePending) _desktopWindowService.AttachToDesktop(new WindowInteropHelper(this).Handle);
     }
 
     private void Window_Deactivated(object? sender, EventArgs e)
     {
-        if (_activationInProgress || !_temporarilyDetachedForActivation || Topmost) return;
-        _temporarilyDetachedForActivation = false;
-        _desktopWindowService.AttachToDesktop(new WindowInteropHelper(this).Handle);
+        if (_activationInProgress || !_desktopActivation.IsRestorePending) return;
+        RestoreDesktopPlacement();
     }
+
+    private void RestoreDesktopPlacement() => _desktopActivation.Restore(() =>
+    {
+        if (!Topmost) _desktopWindowService.AttachToDesktop(new WindowInteropHelper(this).Handle);
+    });
 
     private void UpdatePinVisualState()
     {
@@ -241,7 +248,6 @@ public partial class MainWindow : Window
     {
         Topmost = !Topmost;
         var handle = new WindowInteropHelper(this).Handle;
-        _temporarilyDetachedForActivation = false;
         _desktopWindowService.SetTopmost(handle, Topmost);
         if (!Topmost) _desktopWindowService.AttachToDesktop(handle);
         UpdatePinVisualState();
