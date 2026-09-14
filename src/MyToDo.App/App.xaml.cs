@@ -7,7 +7,7 @@ using MyToDo.App.ViewModels;
 
 namespace MyToDo.App;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private ISingleInstanceService? _instance;
     private ISettingsStore? _settingsStore;
@@ -42,7 +42,7 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
-            MessageBox.Show($"Unable to initialize the database at {databasePath}.\n\n{exception.Message}", "MyToDo", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show($"Unable to initialize the database at {databasePath}.\n\n{exception.Message}", "MyToDo", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
     }
