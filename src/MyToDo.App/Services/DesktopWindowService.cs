@@ -76,7 +76,8 @@ public static class WindowBounds
 
         if (displays.Any(display => Intersects(normalized, display))) return normalized;
 
-        var primary = displays[0];
+        var primary = displays.FirstOrDefault(display => display.IsPrimary);
+        if (primary.Width <= 0 || primary.Height <= 0) primary = displays[0];
         var maxLeft = Math.Max(primary.Left, primary.Right - normalized.Width);
         var maxTop = Math.Max(primary.Top, primary.Bottom - normalized.Height);
         return normalized with
@@ -89,4 +90,15 @@ public static class WindowBounds
     private static bool Intersects(AppSettings settings, DisplayBounds display) =>
         settings.Left < display.Right && settings.Left + settings.Width > display.Left &&
         settings.Top < display.Bottom && settings.Top + settings.Height > display.Top;
+}
+
+public static class WindowActivation
+{
+    public static void Activate(bool isTopmost, Action<bool> setTopmost, Action activate)
+    {
+        ArgumentNullException.ThrowIfNull(setTopmost);
+        ArgumentNullException.ThrowIfNull(activate);
+        activate();
+        setTopmost(isTopmost);
+    }
 }

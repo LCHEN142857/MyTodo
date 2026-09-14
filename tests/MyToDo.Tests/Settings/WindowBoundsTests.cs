@@ -16,4 +16,18 @@ public sealed class WindowBoundsTests
         result.Left.Should().BeInRange(0, 1660);
         result.Top.Should().BeInRange(0, 720);
     }
+
+    [Fact]
+    public void Offscreen_bounds_use_the_primary_work_area_when_it_is_not_first()
+    {
+        var saved = AppSettings.Default with { Left = -9000, Top = -9000 };
+        var result = WindowBounds.EnsureVisible(saved,
+        [
+            new DisplayBounds(1920, 0, 1920, 1040),
+            new DisplayBounds(0, 0, 1920, 1040, IsPrimary: true)
+        ]);
+
+        result.Left.Should().BeInRange(0, 1660);
+        result.Top.Should().BeInRange(0, 720);
+    }
 }

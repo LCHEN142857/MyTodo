@@ -67,14 +67,14 @@ public partial class MainWindow : Window
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Show();
         Activate();
-        Topmost = true;
-        Topmost = false;
+        WindowActivation.Activate(Topmost, value => Topmost = value, () => _ = Activate());
+        UpdatePinVisualState();
     }
 
     public Task PersistSettingsAsync() => _persistTask ??= _settingsStore.SaveAsync(new AppSettings(Left, Top, Width, Height, Opacity, Topmost));
 
     private static IReadOnlyList<DisplayBounds> GetDisplayBounds() => System.Windows.Forms.Screen.AllScreens
-        .Select(screen => new DisplayBounds(screen.WorkingArea.Left, screen.WorkingArea.Top, screen.WorkingArea.Width, screen.WorkingArea.Height))
+        .Select(screen => new DisplayBounds(screen.WorkingArea.Left, screen.WorkingArea.Top, screen.WorkingArea.Width, screen.WorkingArea.Height, screen.Primary))
         .ToArray();
 
     private void Window_SourceInitialized(object? sender, EventArgs e)
