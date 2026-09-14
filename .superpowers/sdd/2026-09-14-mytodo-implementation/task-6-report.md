@@ -16,3 +16,15 @@ Implemented the deterministic packaging pipeline and replaced the README with Wi
 - Publish sets `AssemblyName=MyToDo` so the required artifact is `artifacts/publish/MyToDo.exe`.
 - `PackagingContractTests` backs up and restores any existing publish directory so its dotnet shim cannot overwrite a real package during the full test suite.
 
+## Round 1 Review Fixes
+
+- Added `-OutputPath` to `build.ps1`; the packaging contract now uses a temporary output directory and never mutates `artifacts/publish`.
+- Added cleanup validation for filesystem roots, repository paths outside `artifacts`, files, and reparse-point directories.
+- Added `IncludeNativeLibrariesForSelfExtract=true`, `DebugSymbols=false`, and `DebugType=None`; the default publish now leaves only `MyToDo.exe`.
+
+## Round 1 Verification
+
+- `dotnet test MyToDo.sln --filter PackagingContractTests`: 2 passed.
+- `.\build.ps1`: full suite 33 passed; default publish produced one file, `artifacts/publish/MyToDo.exe` (163,692,495 bytes).
+- Artifact header validation: `MZ` and `PE\0\0`.
+- `dotnet test MyToDo.sln -c Release --no-restore`: 33 passed.

@@ -28,3 +28,9 @@ The script restores the solution, runs the complete test suite, and publishes a 
 ```powershell
 .\artifacts\publish\MyToDo.exe
 ```
+
+For CI or local isolation, pass an alternate output directory with `-OutputPath`; the default remains `artifacts/publish`:
+
+```powershell
+.\build.ps1 -OutputPath .\artifacts\publish-local
+```

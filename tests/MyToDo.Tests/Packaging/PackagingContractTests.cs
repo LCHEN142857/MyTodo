@@ -14,12 +14,10 @@ public sealed class PackagingContractTests
         File.Exists(buildScript).Should().BeTrue($"build script should exist at {buildScript}");
 
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"MyToDo-Packaging-{Guid.NewGuid():N}");
-        var publishDirectory = Path.Combine(RepositoryRoot, "artifacts", "publish");
-        var publishBackup = Path.Combine(Path.GetDirectoryName(publishDirectory)!, $".publish-backup-{Guid.NewGuid():N}");
+        var publishDirectory = Path.Combine(tempDirectory, "publish");
         var logPath = Path.Combine(tempDirectory, "dotnet.log");
         var shimPath = Path.Combine(tempDirectory, "dotnet.cmd");
         Directory.CreateDirectory(tempDirectory);
-        if (Directory.Exists(publishDirectory)) Directory.Move(publishDirectory, publishBackup);
         Directory.CreateDirectory(publishDirectory);
         File.WriteAllText(Path.Combine(publishDirectory, "stale.txt"), "stale");
         File.WriteAllText(shimPath, "@echo off\r\necho %*>>\"%MYTODO_DOTNET_LOG%\"\r\necho %* | findstr /C:\"publish\" >nul\r\nif not errorlevel 1 (\r\n  if not exist \"%MYTODO_DOTNET_PUBLISH_DIR%\" mkdir \"%MYTODO_DOTNET_PUBLISH_DIR%\"\r\n  echo packaged>\"%MYTODO_DOTNET_PUBLISH_DIR%\\MyToDo.exe\"\r\n)\r\nexit /b 0\r\n");
@@ -33,7 +31,7 @@ public sealed class PackagingContractTests
             Environment.SetEnvironmentVariable("MYTODO_DOTNET_LOG", logPath);
             Environment.SetEnvironmentVariable("MYTODO_DOTNET_PUBLISH_DIR", publishDirectory);
 
-            var result = RunPowerShell("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", buildScript);
+            var result = RunPowerShell("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", buildScript, "-OutputPath", publishDirectory);
 
             result.ExitCode.Should().Be(0, result.Output);
             File.Exists(Path.Combine(publishDirectory, "stale.txt")).Should().BeFalse();
@@ -46,17 +44,19 @@ public sealed class PackagingContractTests
             invocations.Should().ContainSingle(x => x.Contains("test", StringComparison.Ordinal) && !x.Contains("--filter", StringComparison.Ordinal));
             invocations.Should().ContainSingle(x => x.Contains("publish", StringComparison.Ordinal)
                                                    && x.Contains("-r win-x64", StringComparison.Ordinal)
+                                                   && x.Contains("-p:RuntimeIdentifier=win-x64", StringComparison.Ordinal)
                                                    && x.Contains("-p:SelfContained=true", StringComparison.Ordinal)
                                                    && x.Contains("-p:PublishSingleFile=true", StringComparison.Ordinal)
-                                                   && x.Contains("artifacts\\publish", StringComparison.Ordinal));
+                                                   && x.Contains("-p:IncludeNativeLibrariesForSelfExtract=true", StringComparison.Ordinal)
+                                                   && x.Contains("-p:DebugSymbols=false", StringComparison.Ordinal)
+                                                   && x.Contains("-p:DebugType=None", StringComparison.Ordinal)
+                                                   && x.Contains(publishDirectory, StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
             Environment.SetEnvironmentVariable("MYTODO_DOTNET", originalDotnet);
             Environment.SetEnvironmentVariable("MYTODO_DOTNET_LOG", originalLog);
             Environment.SetEnvironmentVariable("MYTODO_DOTNET_PUBLISH_DIR", originalPublish);
-            if (Directory.Exists(publishDirectory)) Directory.Delete(publishDirectory, true);
-            if (Directory.Exists(publishBackup)) Directory.Move(publishBackup, publishDirectory);
             if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
         }
     }

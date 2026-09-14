@@ -3,7 +3,8 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string] $Configuration = 'Release',
     [ValidateSet('win-x64')]
-    [string] $Runtime = 'win-x64'
+    [string] $Runtime = 'win-x64',
+    [string] $OutputPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,9 +24,34 @@ function Invoke-Dotnet([string[]] $Arguments) {
 
 $repositoryRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts'))
-$publishPath = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'publish'))
-if (-not (IsChildOf $publishPath $artifactsRoot)) {
-    throw "Refusing to clean publish path outside artifacts: $publishPath"
+$defaultOutputPath = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'publish'))
+if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    $publishPath = $defaultOutputPath
+} elseif ([IO.Path]::IsPathRooted($OutputPath)) {
+    $publishPath = [IO.Path]::GetFullPath($OutputPath)
+} else {
+    $publishPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot $OutputPath))
+}
+$normalizedPublishPath = $publishPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+if ([string]::IsNullOrWhiteSpace($normalizedPublishPath) -or $normalizedPublishPath -eq [IO.Path]::GetPathRoot($normalizedPublishPath)) {
+    throw "Refusing to clean filesystem root: $publishPath"
+}
+$isUnderRepository = IsChildOf $publishPath $repositoryRoot
+$isUnderArtifacts = IsChildOf $publishPath $artifactsRoot
+if ($isUnderRepository -and -not $isUnderArtifacts) {
+    throw "Refusing to clean repository path outside artifacts: $publishPath"
+}
+if ([string]::IsNullOrWhiteSpace($OutputPath) -and -not $isUnderArtifacts) {
+    throw "Refusing to clean default publish path outside artifacts: $publishPath"
+}
+if (Test-Path -LiteralPath $publishPath) {
+    $publishItem = Get-Item -LiteralPath $publishPath -Force
+    if (($publishItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing to clean reparse-point publish path: $publishPath"
+    }
+    if (-not $publishItem.PSIsContainer) {
+        throw "Publish path is not a directory: $publishPath"
+    }
 }
 
 $dotnetCandidates = @()
@@ -53,7 +79,7 @@ New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
 
 Write-Host "Publishing $Runtime single-file executable..."
 $runtimeIdentifierProperty = "-p:RuntimeIdentifier=$Runtime"
-Invoke-Dotnet @('publish', (Join-Path $repositoryRoot 'src\MyToDo.App\MyToDo.App.csproj'), '-c', $Configuration, '-r', $Runtime, $runtimeIdentifierProperty, '-p:SelfContained=true', '-p:PublishSingleFile=true', '-p:AssemblyName=MyToDo', '-o', $publishPath)
+Invoke-Dotnet @('publish', (Join-Path $repositoryRoot 'src\MyToDo.App\MyToDo.App.csproj'), '-c', $Configuration, '-r', $Runtime, $runtimeIdentifierProperty, '-p:SelfContained=true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugSymbols=false', '-p:DebugType=None', '-p:AssemblyName=MyToDo', '-o', $publishPath)
 
 $executablePath = Join-Path $publishPath 'MyToDo.exe'
 if (-not (Test-Path -LiteralPath $executablePath)) {
