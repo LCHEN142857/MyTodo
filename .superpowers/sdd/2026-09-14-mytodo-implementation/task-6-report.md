@@ -7,6 +7,17 @@ Implemented the deterministic packaging pipeline and replaced the README with Wi
 - `dotnet test MyToDo.sln --filter PackagingContractTests`: 2 passed.
 - `.\build.ps1`: restore, full test suite (33 passed), and self-contained single-file `win-x64` publish succeeded.
 - `dotnet test MyToDo.sln -c Release --no-restore`: 33 passed.
+
+## Round 2 Review Fixes
+
+- Restricted `-OutputPath` to a strict descendant of the repository `artifacts` directory; the artifacts root itself and external paths are rejected.
+- Added ancestor-by-ancestor reparse-point validation from the requested output path through `artifacts`, preventing junction/symlink redirection during recursive cleanup.
+- Added focused contract coverage for external output rejection and reparse-point ancestor rejection.
+
+## Round 2 Verification
+
+- Focused `PackagingContractTests`: 4 passed.
+- Default `artifacts/publish` remains a valid single-file executable from the prior bounded publish verification.
 - `artifacts/publish/MyToDo.exe`: 153,784,001 bytes; PE header validated (`MZ`, `PE\0\0`).
 - `git diff --check`: no whitespace errors.
 
