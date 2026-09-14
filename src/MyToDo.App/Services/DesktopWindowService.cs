@@ -98,7 +98,8 @@ public static class WindowActivation
     {
         ArgumentNullException.ThrowIfNull(setTopmost);
         ArgumentNullException.ThrowIfNull(activate);
+        if (!isTopmost) setTopmost(true);
         activate();
-        setTopmost(isTopmost);
+        if (!isTopmost) setTopmost(false);
     }
 }

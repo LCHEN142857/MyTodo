@@ -15,6 +15,6 @@ public sealed class WindowActivationTests
 
         WindowActivation.Activate(initialTopmost, observed.Add, () => { });
 
-        observed.Should().Equal(initialTopmost);
+        observed.Should().Equal(initialTopmost ? [] : [true, false]);
     }
 }
