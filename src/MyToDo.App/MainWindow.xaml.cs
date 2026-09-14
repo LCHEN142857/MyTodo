@@ -12,6 +12,7 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using CheckBox = System.Windows.Controls.CheckBox;
 using Brush = System.Windows.Media.Brush;
 using MyToDo.App.Data;
+using MyToDo.App.Domain;
 using MyToDo.App.Services;
 using MyToDo.App.Settings;
 using MyToDo.App.ViewModels;
@@ -26,8 +27,10 @@ public partial class MainWindow : Window
     private readonly IDesktopWindowService _desktopWindowService;
     private readonly ScrollbarVisibilityController _scrollbarVisibility;
     private readonly DispatcherTimer _shellRefreshTimer;
+    private readonly SettingsSaveCoordinator _settingsSaveCoordinator;
     private MainViewModel? _subscribedViewModel;
-    private Task? _persistTask;
+    private bool _temporarilyDetachedForActivation;
+    private bool _activationInProgress;
     private readonly HashSet<TodoItemViewModel> _subscribedRows = [];
     private ScrollViewer? _todoScrollViewer;
 
@@ -36,6 +39,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = viewModel;
         _settingsStore = settingsStore;
+        _settingsSaveCoordinator = new SettingsSaveCoordinator(settingsStore);
         _repository = repository;
         _instance = instance;
         _desktopWindowService = new DesktopWindowService();
@@ -44,7 +48,7 @@ public partial class MainWindow : Window
         _shellRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _shellRefreshTimer.Tick += (_, _) => ReapplyDesktopAttachment();
 
-        var visibleSettings = _desktopWindowService.EnsureVisible(settings, GetDisplayBounds());
+        var visibleSettings = _desktopWindowService.EnsureVisible(settings, _desktopWindowService.GetDisplayBounds());
         Left = visibleSettings.Left;
         Top = visibleSettings.Top;
         Width = visibleSettings.Width;
@@ -54,6 +58,7 @@ public partial class MainWindow : Window
         UpdatePinVisualState();
         SourceInitialized += Window_SourceInitialized;
         Loaded += Window_Loaded;
+        Deactivated += Window_Deactivated;
         Unloaded += (_, _) => DetachRowHandlers();
         Closed += (_, _) =>
         {
@@ -65,17 +70,28 @@ public partial class MainWindow : Window
     public void ActivateFromSecondInstance()
     {
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Show();
-        Activate();
-        WindowActivation.Activate(Topmost, value => Topmost = value, () => _ = Activate());
+        var handle = new WindowInteropHelper(this).Handle;
+        _activationInProgress = true;
+        try
+        {
+            Show();
+            if (!Topmost)
+            {
+                _temporarilyDetachedForActivation = true;
+                _desktopWindowService.DetachFromDesktop(handle);
+            }
+
+            _desktopWindowService.ActivateWindow(handle);
+            Activate();
+        }
+        finally
+        {
+            _activationInProgress = false;
+        }
         UpdatePinVisualState();
     }
 
-    public Task PersistSettingsAsync() => _persistTask ??= _settingsStore.SaveAsync(new AppSettings(Left, Top, Width, Height, Opacity, Topmost));
-
-    private static IReadOnlyList<DisplayBounds> GetDisplayBounds() => System.Windows.Forms.Screen.AllScreens
-        .Select(screen => new DisplayBounds(screen.WorkingArea.Left, screen.WorkingArea.Top, screen.WorkingArea.Width, screen.WorkingArea.Height, screen.Primary))
-        .ToArray();
+    public Task PersistSettingsAsync() => _settingsSaveCoordinator.SaveAsync(new AppSettings(Left, Top, Width, Height, Opacity, Topmost));
 
     private void Window_SourceInitialized(object? sender, EventArgs e)
     {
@@ -103,7 +119,14 @@ public partial class MainWindow : Window
 
     private void ReapplyDesktopAttachment()
     {
-        if (!Topmost) _desktopWindowService.AttachToDesktop(new WindowInteropHelper(this).Handle);
+        if (!Topmost && !_temporarilyDetachedForActivation) _desktopWindowService.AttachToDesktop(new WindowInteropHelper(this).Handle);
+    }
+
+    private void Window_Deactivated(object? sender, EventArgs e)
+    {
+        if (_activationInProgress || !_temporarilyDetachedForActivation || Topmost) return;
+        _temporarilyDetachedForActivation = false;
+        _desktopWindowService.AttachToDesktop(new WindowInteropHelper(this).Handle);
     }
 
     private void UpdatePinVisualState()
@@ -196,17 +219,40 @@ public partial class MainWindow : Window
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) { if (e.OriginalSource == this) DragMove(); }
     private void DragRegion_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) { if (e.OriginalSource is Grid) DragMove(); }
     private void NewTodoInput_KeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter && DataContext is MainViewModel vm) { vm.CreateCommand.Execute(null); e.Handled = true; } }
-    private void SettingsButton_Click(object sender, RoutedEventArgs e) => SettingsPopup.Visibility = SettingsPopup.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+    private async void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsPopup.Visibility != Visibility.Visible)
+        {
+            SettingsPopup.Visibility = Visibility.Visible;
+            return;
+        }
+
+        SettingsPopup.Visibility = Visibility.Collapsed;
+        try
+        {
+            await PersistSettingsAsync();
+        }
+        catch (Exception exception)
+        {
+            if (DataContext is MainViewModel vm) vm.ReportError(exception.Message);
+        }
+    }
     private void PinButton_Click(object sender, RoutedEventArgs e)
     {
         Topmost = !Topmost;
         var handle = new WindowInteropHelper(this).Handle;
+        _temporarilyDetachedForActivation = false;
         _desktopWindowService.SetTopmost(handle, Topmost);
         if (!Topmost) _desktopWindowService.AttachToDesktop(handle);
         UpdatePinVisualState();
     }
     private void ExitButton_Click(object sender, RoutedEventArgs e) => Close();
-    private void CompleteCheckBox_Click(object sender, RoutedEventArgs e) { if (sender is CheckBox box && box.DataContext is TodoItemViewModel row) row.CompleteCommand.Execute(null); }
+    private async void CompleteCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox box || box.DataContext is not TodoItemViewModel row) return;
+        await row.CompleteCommand.ExecuteAsync();
+        if (row.Status != TodoStatus.Completed) box.IsChecked = false;
+    }
     private void TodoText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement element || element.DataContext is not TodoItemViewModel row) return;
@@ -220,6 +266,22 @@ public partial class MainWindow : Window
     }
     private void EditText_KeyDown(object sender, KeyEventArgs e) { if (sender is TextBox box && box.DataContext is TodoItemViewModel row) { if (e.Key == Key.Enter) { row.SaveEditCommand.Execute(null); e.Handled = true; } else if (e.Key == Key.Escape) { row.CancelEditCommand.Execute(null); e.Handled = true; } } }
     private void EditText_LostFocus(object sender, RoutedEventArgs e) { if (sender is TextBox box && box.DataContext is TodoItemViewModel row && row.IsEditing) row.SaveEditCommand.Execute(null); }
+    private void TodoList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Enter or Key.F2) || DataContext is not MainViewModel { CurrentPage: AppPage.ToDo }) return;
+        if (e.OriginalSource is TextBox) return;
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is not TodoItemViewModel row) return;
+        if (row.IsEditing) return;
+        row.BeginEditCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    private void TodoText_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Enter or Key.F2) || sender is not FrameworkElement { DataContext: TodoItemViewModel row }) return;
+        row.BeginEditCommand.Execute(null);
+        e.Handled = true;
+    }
     private void TodoList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         var point = e.GetPosition(TodoList);

@@ -207,5 +207,5 @@ public sealed class MainViewModel : ObservableObject
         _visibleItemsView.Refresh();
     }
 
-    private void ReportError(string message) => ErrorMessage = message;
+    internal void ReportError(string message) => ErrorMessage = message;
 }

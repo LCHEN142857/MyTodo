@@ -58,8 +58,20 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        if (_window is not null) _window.PersistSettingsAsync().GetAwaiter().GetResult();
-        if (_instance is not null) _instance.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        base.OnExit(e);
+        try
+        {
+            if (_window is not null) _window.PersistSettingsAsync().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            try
+            {
+                if (_instance is not null) _instance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                base.OnExit(e);
+            }
+        }
     }
 }

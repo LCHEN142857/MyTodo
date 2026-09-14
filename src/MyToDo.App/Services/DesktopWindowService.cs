@@ -13,6 +13,22 @@ public sealed class DesktopWindowService : IDesktopWindowService
     private static readonly IntPtr HwndTopmost = new(-1);
     private static readonly IntPtr HwndNotTopmost = new(-2);
 
+    public IReadOnlyList<DisplayBounds> GetDisplayBounds() => System.Windows.Forms.Screen.AllScreens
+        .Select(screen =>
+        {
+            var area = screen.WorkingArea;
+            var (scaleX, scaleY) = GetSystemScale();
+            return DisplayBounds.FromPixels(area.Left, area.Top, area.Width, area.Height, scaleX, scaleY, screen.Primary);
+        })
+        .ToArray();
+
+    public void DetachFromDesktop(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero) return;
+        SetParent(windowHandle, IntPtr.Zero);
+        SetWindowPos(windowHandle, HwndNotTopmost, 0, 0, 0, 0, SetWindowPosNoMove | SetWindowPosNoSize | SetWindowPosNoActivate | SetWindowPosShowWindow);
+    }
+
     public AppSettings EnsureVisible(AppSettings settings, IReadOnlyList<DisplayBounds> displays) => WindowBounds.EnsureVisible(settings, displays);
 
     public void AttachToDesktop(IntPtr windowHandle)
@@ -57,7 +73,29 @@ public sealed class DesktopWindowService : IDesktopWindowService
         return worker;
     }
 
+    public void ActivateWindow(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero) return;
+        ShowWindow(windowHandle, ShowWindowRestore);
+        SetForegroundWindow(windowHandle);
+    }
+
+    private static (double X, double Y) GetSystemScale()
+    {
+        try
+        {
+            var dpi = GetDpiForSystem();
+            if (dpi > 0) return (dpi / 96d, dpi / 96d);
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+
+        return (1, 1);
+    }
+
     private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+
+    private const int ShowWindowRestore = 9;
 
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr FindWindow(string className, string? windowName);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowName);
@@ -65,6 +103,9 @@ public sealed class DesktopWindowService : IDesktopWindowService
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetParent(IntPtr child, IntPtr parent);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll")] private static extern uint GetDpiForSystem();
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
 }
 
 public static class WindowBounds
@@ -94,12 +135,25 @@ public static class WindowBounds
 
 public static class WindowActivation
 {
-    public static void Activate(bool isTopmost, Action<bool> setTopmost, Action activate)
+    public static void Activate(bool isTopmost, Action<bool> setTopmost, Action activate, Action? restoreDesktopPlacement = null)
     {
         ArgumentNullException.ThrowIfNull(setTopmost);
         ArgumentNullException.ThrowIfNull(activate);
-        if (!isTopmost) setTopmost(true);
-        activate();
-        if (!isTopmost) setTopmost(false);
+        if (isTopmost)
+        {
+            activate();
+            return;
+        }
+
+        setTopmost(true);
+        try
+        {
+            activate();
+        }
+        finally
+        {
+            setTopmost(false);
+            restoreDesktopPlacement?.Invoke();
+        }
     }
 }

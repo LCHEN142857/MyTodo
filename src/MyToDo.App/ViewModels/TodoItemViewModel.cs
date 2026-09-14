@@ -44,6 +44,7 @@ public sealed class TodoItemViewModel : ObservableObject
 
     public long Id => _item.Id;
     public TodoStatus Status => _item.Status;
+    public bool IsCompleted => Status == TodoStatus.Completed;
     public string Content
     {
         get => _content;
@@ -124,6 +125,7 @@ public sealed class TodoItemViewModel : ObservableObject
             await operation(Id, CancellationToken.None);
             _item = _item with { Status = status };
             OnPropertyChanged(nameof(Status));
+            OnPropertyChanged(nameof(IsCompleted));
             ErrorMessage = null;
             if (_statusChanged is not null)
             {

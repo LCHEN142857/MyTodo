@@ -13,7 +13,7 @@ public sealed class UiContractTests
         File.Exists(path).Should().BeTrue($"MainWindow.xaml should exist at {path}");
         var document = XDocument.Load(path);
         var names = document.Descendants().SelectMany(x => x.Attributes()).Where(a => a.Name.LocalName == "Name").Select(a => a.Value).ToHashSet(StringComparer.Ordinal);
-        var required = new[] { "RootWindow", "DragRegion", "NewTodoInput", "AddTodoButton", "SearchInput", "TodoList", "HistoryButton", "TodoButton", "SettingsButton", "PinButton", "CleanHistoriesButton", "OpacitySlider", "ExitButton" };
+        var required = new[] { "RootWindow", "DragRegion", "NewTodoInput", "AddTodoButton", "SearchInput", "ErrorMessageText", "TodoList", "HistoryButton", "TodoButton", "SettingsButton", "PinButton", "CleanHistoriesButton", "OpacitySlider", "ExitButton" };
         names.Should().Contain(required);
 
         var text = File.ReadAllText(path);
@@ -26,7 +26,20 @@ public sealed class UiContractTests
         var appCode = File.ReadAllText(Path.Combine(Path.GetDirectoryName(path)!, "App.xaml.cs"));
         appCode.Should().NotContain("async void OnExit");
         appCode.Should().Contain("PersistSettingsAsync().GetAwaiter().GetResult()");
+        appCode.Should().Contain("finally");
         text.Should().Contain("x:Name=\"TodoText\"").And.Contain("x:Name=\"EditTodoText\"");
+        text.Should().Contain("WindowChrome.IsHitTestVisibleInChrome=\"True\"");
+        text.Should().Contain("Text=\"{Binding ErrorMessage}\"");
+        text.Should().Contain("KeyDown=\"TodoText_KeyDown\"");
+        text.Should().Contain("KeyDown=\"TodoList_KeyDown\"");
+        text.Should().Contain("Value=\"{Binding IsCompleted, Mode=OneWay}\"");
+        var historyText = document.Descendants().Single(x => x.Attributes().Any(a => a.Name.LocalName == "Name" && a.Value == "HistoryText"));
+        historyText.Attribute("TextWrapping")?.Value.Should().Be("Wrap");
+        var todoText = document.Descendants().Single(x => x.Attributes().Any(a => a.Name.LocalName == "Name" && a.Value == "TodoText"));
+        todoText.Attribute("Focusable")?.Value.Should().Be("True");
+        codeBehind.Should().NotContain("_persistTask");
+        codeBehind.Should().Contain("PersistSettingsAsync");
+        codeBehind.Should().Contain("await PersistSettingsAsync()");
         text.Should().Contain("<MultiDataTrigger>");
         text.Should().Contain("Binding=\"{Binding IsEditing}\" Value=\"False\"");
         text.Should().Contain("Binding=\"{Binding IsEditing}\" Value=\"True\"");
