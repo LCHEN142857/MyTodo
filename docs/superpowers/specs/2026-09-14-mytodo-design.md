@@ -200,4 +200,3 @@ scaling.
 self-contained, single-file `win-x64` executable into `artifacts\publish`. The
 deliverable includes the executable and a concise README describing launch,
 storage locations, and build prerequisites.
-
