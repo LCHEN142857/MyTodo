@@ -144,6 +144,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception exception)
         {
             ErrorMessage = exception.Message;
+            throw;
         }
     }
 

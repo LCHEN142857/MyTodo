@@ -98,6 +98,16 @@ public sealed class MainViewModelTests
         vm.ErrorMessage.Should().Be("Database unavailable.");
     }
 
+    [Fact]
+    public async Task Startup_load_failure_is_propagated_to_the_application()
+    {
+        var repository = new FailingLoadRepository();
+
+        var action = () => MainViewModel.CreateAsync(repository);
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("Database unavailable.");
+    }
+
     private sealed class SeededRepository : IAsyncDisposable
     {
         private SeededRepository(string databasePath, TodoRepository repository)
@@ -145,5 +155,17 @@ public sealed class MainViewModelTests
         public Task RestoreAsync(long id, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task DeleteAsync(long id, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task ClearCompletedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class FailingLoadRepository : ITodoRepository
+    {
+        public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<TodoItem>> QueryAsync(TodoStatus status, CancellationToken cancellationToken = default) => Task.FromException<IReadOnlyList<TodoItem>>(new InvalidOperationException("Database unavailable."));
+        public Task<TodoItem> CreateAsync(string deviceName, string windowsUsername, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RenameAsync(long id, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task CompleteAsync(long id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RestoreAsync(long id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task DeleteAsync(long id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ClearCompletedAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -15,7 +16,9 @@ public partial class MainWindow : Window
     private readonly ISettingsStore _settingsStore;
     private readonly ITodoRepository _repository;
     private readonly ISingleInstanceService _instance;
-    private bool _closing;
+    private MainViewModel? _subscribedViewModel;
+    private Task? _persistTask;
+    private readonly HashSet<TodoItemViewModel> _subscribedRows = [];
 
     public MainWindow(MainViewModel viewModel, AppSettings settings, ISettingsStore settingsStore, ITodoRepository repository, ISingleInstanceService instance)
     {
@@ -31,6 +34,7 @@ public partial class MainWindow : Window
         Opacity = settings.Opacity;
         Topmost = settings.IsTopmost;
         Loaded += (_, _) => AttachRowHandlers();
+        Unloaded += (_, _) => DetachRowHandlers();
     }
 
     public void ActivateFromSecondInstance()
@@ -42,13 +46,45 @@ public partial class MainWindow : Window
         Topmost = false;
     }
 
-    public async Task PersistSettingsAsync() => await _settingsStore.SaveAsync(new AppSettings(Left, Top, Width, Height, Opacity, Topmost));
+    public Task PersistSettingsAsync() => _persistTask ??= _settingsStore.SaveAsync(new AppSettings(Left, Top, Width, Height, Opacity, Topmost));
 
     private void AttachRowHandlers()
     {
         if (DataContext is not MainViewModel vm) return;
-        foreach (var row in vm.VisibleItems) row.RequestSelectAll += Row_RequestSelectAll;
-        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.VisibleItems)) AttachRowHandlers(); };
+        if (ReferenceEquals(_subscribedViewModel, vm)) return;
+        DetachRowHandlers();
+        _subscribedViewModel = vm;
+        ((INotifyCollectionChanged)vm.VisibleItems).CollectionChanged += VisibleItems_CollectionChanged;
+        foreach (var row in vm.VisibleItems) SubscribeRow(row);
+    }
+
+    private void VisibleItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            foreach (var row in _subscribedRows.ToArray()) UnsubscribeRow(row);
+            if (_subscribedViewModel is not null) foreach (var row in _subscribedViewModel.VisibleItems) SubscribeRow(row);
+            return;
+        }
+        if (e.OldItems is not null) foreach (TodoItemViewModel row in e.OldItems) UnsubscribeRow(row);
+        if (e.NewItems is not null) foreach (TodoItemViewModel row in e.NewItems) SubscribeRow(row);
+    }
+
+    private void SubscribeRow(TodoItemViewModel row)
+    {
+        if (_subscribedRows.Add(row)) row.RequestSelectAll += Row_RequestSelectAll;
+    }
+
+    private void UnsubscribeRow(TodoItemViewModel row)
+    {
+        if (_subscribedRows.Remove(row)) row.RequestSelectAll -= Row_RequestSelectAll;
+    }
+
+    private void DetachRowHandlers()
+    {
+        if (_subscribedViewModel is not null) ((INotifyCollectionChanged)_subscribedViewModel.VisibleItems).CollectionChanged -= VisibleItems_CollectionChanged;
+        foreach (var row in _subscribedRows.ToArray()) UnsubscribeRow(row);
+        _subscribedViewModel = null;
     }
 
     private void Row_RequestSelectAll(object? sender, EventArgs e)
@@ -84,7 +120,7 @@ public partial class MainWindow : Window
     private void NewTodoInput_KeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter && DataContext is MainViewModel vm) { vm.CreateCommand.Execute(null); e.Handled = true; } }
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => SettingsPopup.Visibility = SettingsPopup.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
     private void PinButton_Click(object sender, RoutedEventArgs e) => Topmost = !Topmost;
-    private void ExitButton_Click(object sender, RoutedEventArgs e) { _closing = true; Close(); }
+    private void ExitButton_Click(object sender, RoutedEventArgs e) => Close();
     private void CompleteCheckBox_Click(object sender, RoutedEventArgs e) { if (sender is CheckBox box && box.DataContext is TodoItemViewModel row) row.CompleteCommand.Execute(null); }
     private void TodoText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -99,5 +135,4 @@ public partial class MainWindow : Window
     }
     private void EditText_KeyDown(object sender, KeyEventArgs e) { if (sender is TextBox box && box.DataContext is TodoItemViewModel row) { if (e.Key == Key.Enter) { row.SaveEditCommand.Execute(null); e.Handled = true; } else if (e.Key == Key.Escape) { row.CancelEditCommand.Execute(null); e.Handled = true; } } }
     private void EditText_LostFocus(object sender, RoutedEventArgs e) { if (sender is TextBox box && box.DataContext is TodoItemViewModel row && row.IsEditing) row.SaveEditCommand.Execute(null); }
-    private async void Window_Closing(object? sender, CancelEventArgs e) { if (_closing) await PersistSettingsAsync(); }
 }
