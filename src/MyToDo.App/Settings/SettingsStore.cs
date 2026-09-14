@@ -33,7 +33,7 @@ public sealed class SettingsStore : ISettingsStore
         try
         {
             await using var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions, cancellationToken);
+            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
             return (settings ?? AppSettings.Default).Normalize();
         }
         catch (JsonException) { return AppSettings.Default; }
@@ -49,8 +49,8 @@ public sealed class SettingsStore : ISettingsStore
         {
             await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
             {
-                await JsonSerializer.SerializeAsync(stream, normalized, JsonOptions, cancellationToken);
-                await stream.FlushAsync(cancellationToken);
+                await JsonSerializer.SerializeAsync(stream, normalized, JsonOptions, cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 stream.Flush(true);
             }
 

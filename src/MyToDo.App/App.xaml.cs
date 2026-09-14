@@ -56,10 +56,10 @@ public partial class App : Application
         }
     }
 
-    protected override async void OnExit(ExitEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
-        if (_window is not null) await _window.PersistSettingsAsync();
-        if (_instance is not null) await _instance.DisposeAsync();
+        if (_window is not null) _window.PersistSettingsAsync().GetAwaiter().GetResult();
+        if (_instance is not null) _instance.DisposeAsync().AsTask().GetAwaiter().GetResult();
         base.OnExit(e);
     }
 }
