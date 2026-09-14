@@ -122,7 +122,7 @@ public sealed class SingleInstanceService : ISingleInstanceService
         var acquired = false;
         try
         {
-            try { acquired = _mutex.WaitOne(ConnectionTimeout); }
+            try { acquired = _mutex.WaitOne(0); }
             catch (AbandonedMutexException) { acquired = true; }
             if (!acquired)
             {

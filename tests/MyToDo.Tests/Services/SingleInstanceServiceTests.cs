@@ -47,6 +47,19 @@ public sealed class SingleInstanceServiceTests
     }
 
     [Fact]
+    public async Task Second_acquisition_returns_immediately_when_owner_is_alive()
+    {
+        var name = "MyToDo.Tests." + Guid.NewGuid().ToString("N");
+        await using var first = new SingleInstanceService(name);
+        await using var second = new SingleInstanceService(name);
+        (await first.TryAcquireAsync()).Should().BeTrue();
+
+        var started = DateTime.UtcNow;
+        (await second.TryAcquireAsync()).Should().BeFalse();
+        (DateTime.UtcNow - started).Should().BeLessThan(TimeSpan.FromMilliseconds(500));
+    }
+
+    [Fact]
     public async Task Dispose_after_an_async_continuation_releases_the_mutex_for_a_new_instance()
     {
         var name = "MyToDo.Tests." + Guid.NewGuid().ToString("N");
