@@ -54,7 +54,7 @@ MyTodo/
 ├── main.js          # Main process: window creation, IPC handlers, data persistence
 ├── preload.js       # Context bridge: exposes safe APIs to the renderer
 ├── package.json     # Dependencies and electron-builder config
-├── build.ps1        # One-click build script (PowerShell)
+├── build.cmd        # One-click build script (PowerShell/CMD)
 ├── .npmrc            # npm mirror config (for faster downloads in China)
 ├── build/
 │   ├── icon.png     # Source icon (1920×1920 PNG)
@@ -167,7 +167,7 @@ npm start
 ### One-click build (recommended)
 
 ```powershell
-.\build.ps1
+.\build.cmd
 ```
 
 The script will:

@@ -54,7 +54,7 @@ MyTodo/
 ├── main.js          # 主进程：窗口创建、IPC 处理、数据持久化
 ├── preload.js       # 预加载脚本：向渲染进程暴露安全 API
 ├── package.json     # 依赖与 electron-builder 打包配置
-├── build.ps1        # 一键打包脚本（PowerShell）
+├── build.cmd        # 一键打包脚本（PowerShell/CMD）
 ├── .npmrc           # npm 镜像配置（国内加速下载）
 ├── build/
 │   ├── icon.png     # 图标源文件（1920×1920 PNG）
@@ -167,7 +167,7 @@ npm start
 ### 一键打包（推荐）
 
 ```powershell
-.\build.ps1
+.\build.cmd
 ```
 
 脚本会自动完成：
