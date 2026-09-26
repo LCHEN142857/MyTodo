@@ -1,0 +1,48 @@
+{
+  "name": "mytodo",
+  "version": "1.0.0",
+  "description": "MyTodo - A transparent desktop todo list app for Windows",
+  "author": "MyTodo",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --win",
+    "build:portable": "electron-builder --win portable",
+    "build:nsis": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.mytodo.app",
+    "productName": "MyTodo",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "src/icon.ico",
+      "signExecutable": false,
+      "artifactName": "MyTodo-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "MyTodo"
+    },
+    "portable": {
+      "artifactName": "MyTodo-Portable-${version}.${ext}"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  }
+}

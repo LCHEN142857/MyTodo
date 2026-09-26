@@ -1,108 +1,66 @@
-[CmdletBinding()]
-param(
-    [ValidateSet('Debug', 'Release')]
-    [string] $Configuration = 'Release',
-    [ValidateSet('win-x64')]
-    [string] $Runtime = 'win-x64',
-    [string] $OutputPath = ''
-)
+$ErrorActionPreference = "Stop"
 
-$ErrorActionPreference = 'Stop'
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  MyTodo Build Script" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
 
-function IsChildOf([string] $Path, [string] $Parent) {
-    $resolvedPath = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    $resolvedParent = [IO.Path]::GetFullPath($Parent).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    return $resolvedPath.StartsWith($resolvedParent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
-}
+# Set environment variables for faster downloads (China mirror - npmmirror)
+$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://registry.npmmirror.com/-/binary/electron-builder-binaries/"
+$env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
 
-function Assert-SafeOutputPath([string] $Path, [string] $ArtifactsRoot) {
-    $normalizedPath = $Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    $normalizedArtifacts = $ArtifactsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    if ($normalizedPath -eq $normalizedArtifacts -or -not (IsChildOf $normalizedPath $normalizedArtifacts)) {
-        throw "Output path must be a descendant of artifacts: $Path"
-    }
-
-    $current = $normalizedPath
-    while ($true) {
-        if (Test-Path -LiteralPath $current) {
-            $item = Get-Item -LiteralPath $current -Force
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "Refusing to use reparse-point output ancestor: $current"
-            }
-        }
-        if ($current -ieq $normalizedArtifacts) { break }
-        $parentInfo = [IO.Directory]::GetParent($current)
-        $parent = if ($parentInfo) { $parentInfo.FullName } else { $null }
-        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -ieq $current) {
-            throw "Could not validate output path ancestors: $Path"
-        }
-        $current = $parent.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    }
-}
-
-function Invoke-Dotnet([string[]] $Arguments) {
-    & $script:Dotnet @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet command failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')"
-    }
-}
-
-$repositoryRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
-$artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts'))
-$defaultOutputPath = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'publish'))
-if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $publishPath = $defaultOutputPath
-} elseif ([IO.Path]::IsPathRooted($OutputPath)) {
-    $publishPath = [IO.Path]::GetFullPath($OutputPath)
+# Step 1: Install dependencies if needed
+if (-not (Test-Path "node_modules\electron\dist\electron.exe")) {
+    Write-Host "[1/4] Installing dependencies..." -ForegroundColor Yellow
+    npm install
+    if ($LASTEXITCODE -ne 0) { Write-Host "npm install failed!" -ForegroundColor Red; exit 1 }
 } else {
-    $publishPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot $OutputPath))
+    Write-Host "[1/4] Dependencies already installed." -ForegroundColor Green
 }
-$normalizedPublishPath = $publishPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-if ([string]::IsNullOrWhiteSpace($normalizedPublishPath) -or $normalizedPublishPath -eq [IO.Path]::GetPathRoot($normalizedPublishPath)) {
-    throw "Refusing to clean filesystem root: $publishPath"
+
+# Step 2: Verify icon exists
+$srcIconIco = "src\icon.ico"
+if (-not (Test-Path $srcIconIco)) {
+    Write-Host "ERROR: $srcIconIco not found! Please place the app icon there before building." -ForegroundColor Red
+    exit 1
 }
-Assert-SafeOutputPath $publishPath $artifactsRoot
-if (Test-Path -LiteralPath $publishPath) {
-    $publishItem = Get-Item -LiteralPath $publishPath -Force
-    if (($publishItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "Refusing to clean reparse-point publish path: $publishPath"
+Write-Host "[2/4] Using icon: $srcIconIco" -ForegroundColor Green
+
+# Step 3: Build with electron-builder (unpacked + portable + nsis)
+# --publish never: skip auto-publish (avoids extra network requests)
+# Note: electron-builder sets the icon for portable/installer exes, but win-unpacked\MyTodo.exe
+# keeps the default Electron icon. We fix that in Step 4 with rcedit.
+Write-Host "[3/4] Building executables..." -ForegroundColor Yellow
+npx electron-builder --win portable nsis --publish never
+if ($LASTEXITCODE -ne 0) { Write-Host "Build failed!" -ForegroundColor Red; exit 1 }
+
+# Step 4: Fix icon on win-unpacked\MyTodo.exe using rcedit
+# electron-builder only applies the icon during the packaging step for installers/portable.
+# The unpacked exe retains the default Electron icon, so we use rcedit to fix it.
+$rcedit = "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign\*\rcedit-x64.exe"
+$rceditPath = (Get-Item $rcedit -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+$exePath = "dist\win-unpacked\MyTodo.exe"
+
+if ($rceditPath -and (Test-Path $srcIconIco) -and (Test-Path $exePath)) {
+    Write-Host "[4/4] Setting icon on unpacked executable..." -ForegroundColor Yellow
+    & $rceditPath $exePath --set-icon (Resolve-Path $srcIconIco).Path
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Icon set successfully." -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: rcedit failed, icon may not be set on unpacked exe." -ForegroundColor DarkYellow
     }
-    if (-not $publishItem.PSIsContainer) {
-        throw "Publish path is not a directory: $publishPath"
-    }
+} else {
+    Write-Host "[4/4] Skipping unpacked icon fix (rcedit or icon not found)." -ForegroundColor DarkGray
 }
 
-$dotnetCandidates = @()
-if ($env:MYTODO_DOTNET) { $dotnetCandidates += $env:MYTODO_DOTNET }
-$dotnetCandidates += (Join-Path $repositoryRoot '.tools\dotnet8\dotnet.exe')
-$systemDotnet = Get-Command dotnet -ErrorAction SilentlyContinue
-if ($systemDotnet) { $dotnetCandidates += $systemDotnet.Source }
-$script:Dotnet = $dotnetCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-if (-not $script:Dotnet) {
-    throw 'Unable to find dotnet. Install the .NET 8 SDK or place it at .tools\dotnet8\dotnet.exe.'
+Write-Host ""
+Write-Host "Build complete!" -ForegroundColor Green
+Write-Host ""
+Write-Host "Output files:" -ForegroundColor Cyan
+Get-ChildItem "dist\*.exe" | ForEach-Object {
+    $sizeMB = [math]::Round($_.Length / 1MB, 1)
+    Write-Host "  $($_.Name)  ($sizeMB MB)" -ForegroundColor White
 }
-
-Write-Host "Using dotnet: $script:Dotnet"
-Write-Host 'Restoring solution...'
-Invoke-Dotnet @('restore', (Join-Path $repositoryRoot 'MyToDo.sln'))
-
-Write-Host 'Running test suite...'
-Invoke-Dotnet @('test', (Join-Path $repositoryRoot 'MyToDo.sln'), '-c', $Configuration)
-
-if (Test-Path -LiteralPath $publishPath) {
-    Write-Host "Cleaning $publishPath"
-    Remove-Item -LiteralPath $publishPath -Recurse -Force
-}
-New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
-
-Write-Host "Publishing $Runtime single-file executable..."
-$runtimeIdentifierProperty = "-p:RuntimeIdentifier=$Runtime"
-Invoke-Dotnet @('publish', (Join-Path $repositoryRoot 'src\MyToDo.App\MyToDo.App.csproj'), '-c', $Configuration, '-r', $Runtime, $runtimeIdentifierProperty, '-p:SelfContained=true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugSymbols=false', '-p:DebugType=None', '-p:AssemblyName=MyToDo', '-o', $publishPath)
-
-$executablePath = Join-Path $publishPath 'MyToDo.exe'
-if (-not (Test-Path -LiteralPath $executablePath)) {
-    throw "Publish completed without expected executable: $executablePath"
-}
-$executable = Get-Item -LiteralPath $executablePath
-if ($executable.Length -le 0) { throw "Published executable is empty: $executablePath" }
-Write-Host ("Published executable: {0} ({1:N0} bytes)" -f $executable.FullName, $executable.Length)
+Write-Host ""
+Write-Host "Unpacked app: dist\win-unpacked\MyTodo.exe" -ForegroundColor DarkGray

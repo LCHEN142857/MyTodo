@@ -1,6 +1,5 @@
-bin/
-obj/
-TestResults/
-.vs/
-artifacts/
-.tools/
+# Dependencies
+node_modules/
+
+# Build output
+dist/
